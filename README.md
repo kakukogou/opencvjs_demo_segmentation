@@ -1,7 +1,7 @@
 # opencvjs_demo_segmentation
 
 ## Download and build opencv.js
-[OpenCV.js installation guild](https://github.com/kakukogou/opencv/tree/opencvjs)
+[OpenCV.js installation guide](https://github.com/kakukogou/opencv/tree/opencvjs)
 
 ## Compile
 
