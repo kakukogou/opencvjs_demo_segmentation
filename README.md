@@ -14,9 +14,9 @@ cd emscripten_build
 
 ### Set the installation folder of OpenCV.js
 In **Makefile**, assign the **OPENCV_INSTALL_DIR** to your local path.
-<pre>
-OPENCV_INSTALL_DIR=\<your_opencvjs_local_repository\>/release_asm/install
-</pre>
+```
+OPENCV_INSTALL_DIR=<your_opencvjs_local_repository>/release_asm/install
+```
 
 ### Build
 <pre>
