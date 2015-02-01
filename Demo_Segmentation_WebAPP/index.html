@@ -1,0 +1,421 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style type="text/css">
+
+    body {
+    }
+
+    #drop_zone {
+        border: 2px dashed #BBB;
+        border-radius: 5px;
+        padding: 100px;
+        text-align: center;
+        color: #BBB;
+        font-family: "Josefin Sans Std Light",Helvetica,sans-serif;
+    }
+
+    #drop_zone.onDragOver {
+        border: 2px dashed rgb(192,192,0);
+        color: rgb(192,192,0);
+    }
+
+    #drop_zone.hidden {
+        /*visibility: hidden;*/ /* cannot see but occupy */
+        display: none; /* take no place */
+    }
+
+    #fieldcontain.hidden {
+        display: none; /* take no place */
+    }
+
+    #container { 
+        position: relative; 
+    }
+
+    #container.hidden {
+        display: none; /* take no place */
+    }
+
+    #sourceImage {
+        position: absolute; top:0px; left:0px;
+        z-index: 1;
+    }
+
+    #maskLayer {
+        position: absolute; top:0px; left:0px;
+        z-index: 10;
+    }
+
+    #operation_zone {
+        position: absolute; top:0px; left:0px;
+        /*border: 1px solid #000; */
+        /*background-color: rgba(0, 0, 0, 0);*/
+        z-index: 20;
+    }
+
+    #debugZone {
+        position: absolute; top:1000px;
+    } 
+    </style>
+</head>
+
+<body>
+    <div id="drop_zone">Drop an image file here</div>
+    <output id="list"></output>
+    <div data-role="fieldcontain" id="fieldcontain" class="hidden">
+        <fieldset data-role="controlgroup" data-type="horizontal" data-role="fieldcontain">
+            <legend>Choose a draw method:</legend>
+
+            <input type="radio" name="radio-choice-1" id="radio-choice-1" value="choice-1"/>
+            <label for="radio-choice-1">Rectangle</label>
+
+            <input type="radio" name="radio-choice-1" id="radio-choice-2" value="choice-2"/>
+            <label for="radio-choice-2">Foreground Pen</label>
+
+            <input type="radio" name="radio-choice-1" id="radio-choice-3" value="choice-3"/>
+            <label for="radio-choice-3">Background Pen</label>
+        </fieldset>    
+    </div>
+    <div id="container" class="hidden">
+        <image id="sourceImage"></image>
+        <canvas id="maskLayer" width="1000" height="1000"></canvas>
+        <canvas id="operation_zone" width="1000" height="1000"></canvas>
+        <canvas id="debugZone" width="1000" height="1000"></canvas>
+    </div>
+
+
+    <script type="text/javascript" src="painter.js" ></script>
+    <script type="text/javascript" src="segmentation.js"></script>
+    <script>
+        var on_init = Module.cwrap('on_init', null, ['number', 'number', 'number', 'number', 'number']);
+        var on_mouse = Module.cwrap('on_mouse', null, ['number', 'number', 'number', 'number', 'number']);
+        var on_process = Module.cwrap('on_process', null, ['number', 'number', 'number']);
+
+        var imageWidth;
+        var imageHeight;
+        var bufferSize;
+        var inputBuf;
+        var outputBuf;
+        var HEAPU8Clamped;
+        var resultImageData;
+
+        var segmentationModuleInit = function(imageElement) {
+            var originalImageWidth = imageElement.naturalWidth;
+            var originalImageHeight = imageElement.naturalHeight;
+            var originalBufferSize = originalImageWidth * originalImageHeight * 4;
+
+            imageWidth = imageElement.width;
+            imageHeight = imageElement.height;
+            bufferSize = imageWidth*imageHeight*4;
+
+            inputBuf = Module._malloc(originalBufferSize);
+            outputBuf = Module._malloc(bufferSize);
+            HEAPU8Clamped = new Uint8ClampedArray(Module.HEAPU8.buffer, outputBuf, bufferSize);
+            resultImageData = new ImageData(HEAPU8Clamped, imageWidth, imageHeight);
+
+            // get imagedata
+            var tempCanvas = document.createElement('canvas');
+            tempCanvas.width = originalImageWidth;
+            tempCanvas.height = originalImageHeight;
+            var tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(imageElement, 0, 0);
+            var tempImageData = tempCtx.getImageData(0, 0, originalImageWidth, originalImageHeight);
+            Module.HEAPU8.set(tempImageData.data, inputBuf);
+
+            // init
+            on_init(inputBuf, originalImageWidth, originalImageHeight, imageWidth, imageHeight);
+        }
+    </script>
+    <script>
+        var EVENT_MOUSEMOVE      = 0;
+        var EVENT_LBUTTONDOWN    = 1;
+        var EVENT_RBUTTONDOWN    = 2;
+        var EVENT_MBUTTONDOWN    = 3;
+        var EVENT_LBUTTONUP      = 4;
+        var EVENT_RBUTTONUP      = 5;
+        var EVENT_MBUTTONUP      = 6;
+        var EVENT_LBUTTONDBLCLK  = 7;
+        var EVENT_RBUTTONDBLCLK  = 8;
+        var EVENT_MBUTTONDBLCLK  = 9;
+        var EVENT_MOUSEWHEEL     = 10;
+        var EVENT_MOUSEHWHEEL    = 11;
+
+        var EVENT_FLAG_LBUTTON   = 1;
+        var EVENT_FLAG_RBUTTON   = 2;
+        var EVENT_FLAG_MBUTTON   = 4;
+        var EVENT_FLAG_CTRLKEY   = 8;
+        var EVENT_FLAG_SHIFTKEY  = 16;
+        var EVENT_FLAG_ALTKEY    = 32;
+
+
+        function resizeImage() {
+            var image = document.getElementById('sourceImage');
+
+            // determine the dimention of current viewport
+            // http://andylangton.co.uk/blog/development/get-viewport-size-width-and-height-javascript
+            var w = window,
+            d = document,
+            e = d.documentElement,
+            g = d.getElementsByTagName('body')[0],
+            w = w.innerWidth || e.clientWidth || g.clientWidth,
+            h = w.innerHeight|| e.clientHeight|| g.clientHeight;
+
+            w = w * 0.9;
+            h = h * 0.9;
+
+            if (image.naturalWidth < w && image.naturalHeight < h) {
+                return;
+            }
+
+            var widthRatio = image.naturalWidth / w;
+            var heightRatio = image.naturalHeight / h;
+
+            var oriW = image.naturalWidth;
+            var oriH = image.naturalHeight;
+
+            // adjust image size
+            if (widthRatio > heightRatio) {
+                console.log("widthRatio > heightRatio");
+                image.width = w;
+                image.height = oriH * w / oriW;
+            }
+            else {
+                console.log("widthRatio <= heightRatio");
+                image.height = h;
+                image.width = oriW * h / oriH;
+            }
+            
+            
+            // if ((image.width/image.height) > 1.0) { // landscape
+            //     image.height = h;
+            //     image.width = oriW * h / oriH;
+            // }
+            // else { // portrait
+            //     image.height = h;
+            //     image.width = oriW * h / oriH;
+            // }            
+        }
+
+        function resizeOperationZone() {
+            var operationZone = document.getElementById('operation_zone');
+            var maskLayer = document.getElementById('maskLayer');
+            
+            var image = document.getElementById('sourceImage');
+            operationZone.width = image.width;
+            operationZone.height = image.height;
+            maskLayer.width = image.width;
+            maskLayer.height = image.height;
+
+            // var ctx = maskLayer.getContext('2d');
+            // ctx.drawImage(image, 0, 0);
+            // // var bgImageData = ctx.createImageData(image.width, image.height);
+            // var bgImageData = ctx.getImageData(0, 0, image.width, image.height);
+            // var size = image.width * image.height;
+            // for (var i = 0; i  < size; ++i) {
+            //     bgImageData.data[4*i+0] = 255;
+            //     bgImageData.data[4*i+1] = 128;
+            //     bgImageData.data[4*i+2] = 0;
+            //     bgImageData.data[4*i+3] = 100;
+            // }
+            // ctx.putImageData(bgImageData, 0, 0);
+        }
+
+        function loadImage(url) {
+            var image = document.getElementById('sourceImage');
+            image.src = url;
+            image.onload = function() {
+
+                // adjust image size
+                resizeImage();
+
+                // adjust the canvas size relatively
+                resizeOperationZone();
+
+                // initialize the segmentation module
+                segmentationModuleInit(image);
+            }
+        }
+
+        function handleFileSelect(evt) {
+            evt.stopPropagation();
+            evt.preventDefault();
+
+            var files = evt.dataTransfer.files; // FileList object.
+
+            // files is a FileList of File objects. List some properties.
+            var output = [];
+            for (var i = 0, file; file = files[i]; i++) {
+                
+                // Only process image files.
+                if (!file.type.match('^image/')) {
+                    continue;
+                }
+
+                var reader = new FileReader();
+
+                reader.onerror = function(evt) {
+                    alert('Error code: ' + evt.target.error.code);
+                };
+
+                // Create a closure to capture the file information.
+                reader.onload = function(evt) {
+                    loadImage(reader.result);
+                }
+
+                // Read in the image file as a data url.
+                reader.readAsDataURL(file);                    
+
+            }
+
+            dropZone.classList.remove('onDragOver');
+            dropZone.classList.add('hidden');
+
+            document.getElementById('fieldcontain').classList.remove('hidden');
+            document.getElementById('container').classList.remove('hidden');
+
+            document.getElementById('radio-choice-1').disabled = false;
+            document.getElementById('radio-choice-1').checked = "checked";
+            document.getElementById('radio-choice-2').disabled = true;
+            document.getElementById('radio-choice-3').disabled = true;
+        }
+
+        function handleDragOver(evt) {
+            evt.stopPropagation();
+            evt.preventDefault();
+            evt.dataTransfer.dropEffect = 'copy'; // Explicitly show this is a copy.
+
+            dropZone.classList.add('onDragOver');
+        }
+
+        function handleDragEnter(evt) {
+            evt.stopPropagation();
+            evt.preventDefault();
+        }
+
+        function handleDragLeave(evt) {
+            evt.stopPropagation();
+            evt.preventDefault();
+            dropZone.classList.remove('onDragOver');
+        }
+
+        //-----------------------------------------------------------------
+        // radio input callbacks
+        function onRectangleButtonClicked() {
+            // change to use rectablge
+            changeMethod("rectabgle");
+        }
+
+        function onForegroundPenButtonClicked() {
+            // change to use foreground pen
+            changeMethod("fgPen");
+        }
+
+        function onBackgroundPenButtonClicked() {
+            // change to use background pen
+            changeMethod("bgPen");
+        }
+
+        //-----------------------------------------------------------------
+        // Foreground Pen mouse callbacks
+        
+        function fgPenMouseDownCallback(x, y) {
+            on_mouse(EVENT_LBUTTONDOWN, x, y, EVENT_FLAG_SHIFTKEY, 0);
+        }
+
+        function fgPenMouseMoveCallback(x, y) {
+            on_mouse(EVENT_MOUSEMOVE, x, y, EVENT_FLAG_SHIFTKEY, 0);
+        }
+
+        function fgPenMouseUpCallback(x, y) {
+            on_mouse(EVENT_LBUTTONUP, x, y, EVENT_FLAG_SHIFTKEY, 0);
+var start = new Date();            
+            on_process(outputBuf, imageWidth, imageHeight);
+var end = new Date();
+console.log("on_process: " + (end.getTime() - start.getTime()) + " ms");            
+            var ha = document.getElementById('maskLayer').getContext('2d');
+            ha.putImageData(resultImageData, 0, 0);
+        }
+
+        //-----------------------------------------------------------------
+        // Background Pen mouse callbacks        
+
+        function bgPenMouseDownCallback(x, y) {
+            on_mouse(EVENT_LBUTTONDOWN, x, y, EVENT_FLAG_CTRLKEY, 0);
+        }
+
+        function bgPenMouseMoveCallback(x, y) {
+            on_mouse(EVENT_MOUSEMOVE, x, y, EVENT_FLAG_CTRLKEY, 0);
+        }
+
+        function bgPenMouseUpCallback(x, y) {
+            on_mouse(EVENT_LBUTTONUP, x, y, EVENT_FLAG_CTRLKEY, 0);
+var start = new Date();            
+            on_process(outputBuf, imageWidth, imageHeight);
+var end = new Date();
+console.log("on_process: " + (end.getTime() - start.getTime()) + " ms");            
+            var ha = document.getElementById('maskLayer').getContext('2d');
+            ha.putImageData(resultImageData, 0, 0);
+        }
+
+        //-----------------------------------------------------------------
+        // Rectangle mouse callbacks
+
+        function rectangleMouseDownCallback(x, y) {
+            on_mouse(EVENT_LBUTTONDOWN, x, y, 0, 0);
+        }
+
+        function rectangleMouseMoveCallback(x, y) {
+            on_mouse(EVENT_MOUSEMOVE, x, y, 0, 0);
+        }
+
+        function rectangleMouseUpCallback(x, y) {
+            on_mouse(EVENT_LBUTTONUP, x, y, 0, 0);
+var start = new Date();
+            on_process(outputBuf, imageWidth, imageHeight);
+var end = new Date();
+console.log("on_process: " + (end.getTime() - start.getTime()) + " ms");
+            var ha = document.getElementById('maskLayer').getContext('2d');
+            ha.putImageData(resultImageData, 0, 0);
+
+            // change drawing method
+            document.getElementById('radio-choice-1').disabled = true;
+            document.getElementById('radio-choice-1').checked = false;
+            document.getElementById('radio-choice-2').disabled = false;
+            document.getElementById('radio-choice-2').checked = true;
+            document.getElementById('radio-choice-3').disabled = false;            
+
+            // change to use pen
+            changeMethod("fgPen");
+        }
+
+        // Setup the dnd listeners.
+        var dropZone = document.getElementById('drop_zone');
+        dropZone.addEventListener('dragover', handleDragOver, false);
+        dropZone.addEventListener('drop', handleFileSelect, false);
+        dropZone.addEventListener('dragenter', handleDragEnter, false);
+        dropZone.addEventListener('dragleave', handleDragLeave, false);
+
+        document.getElementById('radio-choice-1').onclick = onRectangleButtonClicked;
+        document.getElementById('radio-choice-2').onclick = onForegroundPenButtonClicked;
+        document.getElementById('radio-choice-3').onclick = onBackgroundPenButtonClicked; 
+
+
+        // initialize the painter
+        var canvas = document.getElementById('operation_zone'); 
+        painterInit(canvas);
+        setEventCallback("rectangle", "mousedown", rectangleMouseDownCallback);
+        setEventCallback("rectangle", "mousemove", rectangleMouseMoveCallback);
+        setEventCallback("rectangle", "mouseup", rectangleMouseUpCallback);
+
+        setEventCallback("fgPen", "mousedown", fgPenMouseDownCallback);
+        setEventCallback("fgPen", "mousemove", fgPenMouseMoveCallback);
+        setEventCallback("fgPen", "mouseup", fgPenMouseUpCallback);
+
+        setEventCallback("bgPen", "mousedown", bgPenMouseDownCallback);
+        setEventCallback("bgPen", "mousemove", bgPenMouseMoveCallback);
+        setEventCallback("bgPen", "mouseup", bgPenMouseUpCallback);
+    </script>
+</body>
+</html>
